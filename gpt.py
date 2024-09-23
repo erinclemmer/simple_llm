@@ -54,7 +54,7 @@ class GptChat:
             json.dump({
                 "model": self.model,
                 "conversation": self.to_obj_list()
-            }, f)
+            }, f, indent=4)
 
     def add_message(self, role: str, message: str):
         self.messages.append(Message(role, message))
@@ -87,5 +87,5 @@ class GptChat:
         print(f"Sending chat with {res.usage.prompt_tokens} tokens")
         print(f"GPT API responded with {res.usage.completion_tokens} tokens")
         self.add_message("assistant", msg)
-        self.total_tokens += res.usage.total_tokens
+        self.total_tokens = res.usage.total_tokens
         return msg

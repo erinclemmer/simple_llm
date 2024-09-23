@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 from key import get_key
 from gpt import GptChat
@@ -6,6 +7,13 @@ from gpt import GptChat
 print('Loading client...')
 client = GptChat('sys_prompt.txt', get_key())
 print('Welcome to simple chat!\n\n')
+
+def regen_message():
+    print('Regenerating last message')
+    client.messages.pop()
+    last_message = client.messages.pop()
+    res = client.send(last_message.content)
+    print(f'\n\n{client.model}:\n{res}')
 
 def model_menu():
     models = [
@@ -42,7 +50,20 @@ save [file_name]: saves the file to "comletions/[file_name]_[today].json"
 load: go to load menu
 reset: reset conversation
 change_model: change current model
+include [file_name]: include file data in the current context
+regen: rerun last message again
 \n\n''')
+
+def include(file_name: str):
+    full_name = f'data/{file_name}'
+    if not os.path.exists(full_name):
+        print(f'\n\nERROR: file {full_name} does not exist')
+        return
+    with open(full_name, 'r', encoding='utf-8') as f:
+        text = f.read()
+    client.add_message("user", f'Here is a document that I want to include in our conversation:\n{text}')
+    client.add_message("assistant", "Ok")
+    print(f'Including data in conversation from {full_name}:\n{text}')
 
 def load_file(file_name: str):
     full_name = f'completions/{file_name}'
@@ -120,6 +141,12 @@ def run_command(cmd: str):
         load_menu()
     if parts[0] == 'change_model':
         model_menu()
+    if parts[0] == 'include':
+        include(parts[1])
+    if parts[0] == 'regen':
+        regen_message()
+    if parts[0] == 'quit':
+        sys.exit()
 
 def loop(current_input: str = ''):
     print(f'Usage: {client.total_tokens} tokens')
