@@ -121,13 +121,16 @@ def run_command(cmd: str):
     if parts[0] == 'change_model':
         model_menu()
 
-def loop():
+def loop(current_input: str = ''):
     print(f'Usage: {client.total_tokens} tokens')
-    inp = input('User> ')
+    inp = current_input + input('User> ')
     if len(inp) == 0:
         return
     if inp[0] == '\\':
         run_command(inp[1:])
+        return
+    if inp[-1] == '\\':
+        loop(inp + '\n')
         return
     res = client.send(inp)
     print(f'\n{client.model}:\n{res}\n\n')
