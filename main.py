@@ -86,6 +86,7 @@ def load_file(file_name: str):
         client.add_message(role, content)
         print(f'\n\n{role}:\n{content}')
     client.change_model(model)
+    print(f'Model changed to {model}')
 
 def ask_save():
     if len(client.messages) < 2:

@@ -68,24 +68,31 @@ class GptChat:
             raise "Chat Error too many tokens"
         
         self.add_message("user", message)
+        messages = self.to_obj_list()
+        if 'o1' in self.model:
+            messages = messages[1:]
         
         defaultConfig = {
             "model": self.model,
             "max_tokens": max_tokens,
-            "messages": self.to_obj_list(),
+            "messages": messages,
             "temperature": 0.5
         }
 
+        if 'o1' in self.model:
+            del defaultConfig["temperature"]
+            del defaultConfig["max_tokens"]
+
         try:
             res = self.openai_client.chat.completions.create(**defaultConfig)
-        except:
-            print('Error when sending chat, retrying in one minute')
+        except Exception as e:
+            print(f'Error when sending chat, retrying in one minute\n{e}')
             time.sleep(60)
             self.messages = self.messages[:-1]
             self.send(message, max_tokens)
         msg = res.choices[0].message.content.strip()
         print(f"Sending chat with {res.usage.prompt_tokens} tokens")
-        print(f"GPT API responded with {res.usage.completion_tokens} tokens")
+        print(f"GPT API responded with {res.usage.completion_tokens} tokens. \nOverall, {res.usage.total_tokens} total tokens")
         self.add_message("assistant", msg)
         self.total_tokens = res.usage.total_tokens
         return msg
