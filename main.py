@@ -191,6 +191,18 @@ class ChatApp:
         message_label.config(state='disabled')
         message_label.pack(side='left', fill='both', expand=True)
 
+        # Calculate the number of lines
+        num_lines = node.message.count("\n")
+        box_width = 90
+        
+        # Calculate the total word wraps
+        total_word_wraps = 0
+        for num_wraps in [len(line) // box_width for line in node.message.split('\n')]:
+            total_word_wraps += num_wraps
+        
+        # Set the dimensions of the text widget
+        message_label.config(width=box_width, height=num_lines+total_word_wraps)
+
         controls_frame = tk.Frame(frame)
         controls_frame.pack(side='right', fill='y')
 
