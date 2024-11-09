@@ -263,9 +263,6 @@ class ChatApp:
                 frame.destroy()
                 del self.message_widgets[n.id]
 
-    def display_message(self, node):
-        self.add_message_box(node)
-
     def get_response(self, node):
         # Build the message path up to the current node
         path = self.conversation_tree.get_path_from_root(node)
@@ -276,7 +273,7 @@ class ChatApp:
         response = self.client.send(path[-1].message)
         # Add assistant's response to the conversation tree
         assistant_node = self.conversation_tree.add_message(response, 'assistant')
-        self.root.after(0, self.display_message, assistant_node)
+        self.root.after(0, self.add_message_box, assistant_node)
         self.root.after(0, self.update_status)
 
     def update_status(self):
@@ -383,10 +380,10 @@ regen: rerun last message again
             return
         with open(full_name, 'r', encoding='utf-8') as f:
             text = f.read()
-        self.conversation_tree.add_message(f'Here is a document that I want to include in our conversation:\n{text}', 'user')
-        node = self.conversation_tree.current_node
-        self.add_message_box(node)
-        self.get_response(node)
+        user_node = self.conversation_tree.add_message(f'Here is a document that I want to include in our conversation:\n{text}', 'user')
+        self.add_message_box(user_node)
+        assistant_node = self.conversation_tree.add_message('Ok', 'assistant')
+        self.add_message_box(assistant_node)
 
     def load_file(self, full_name: str):
         if not os.path.exists(full_name):
@@ -404,7 +401,6 @@ regen: rerun last message again
         self.deserialize_conversation_tree(data.get('conversation_tree'))
         self.display_from_node(self.conversation_tree.root.selected_child)
         self.update_status()
-        messagebox.showinfo("Load", f"Conversation loaded. Model set to {self.client.model}")
 
     def deserialize_conversation_tree(self, data):
         if not data:
