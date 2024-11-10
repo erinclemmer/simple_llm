@@ -6,12 +6,59 @@ import json
 import sys
 from key import get_key
 from gpt import GptChat
+from uuid import uuid4
+import copy
+
+class MessageNode:
+    def __init__(self, message, role, parent=None):
+        self.id = str(uuid4())
+        self.message = message
+        self.role = role  # 'user' or 'assistant'
+        self.parent = parent  # Reference to parent MessageNode
+        self.children = []  # List of MessageNode
+        self.next = None  # The next MessageNode in the current path
+
+class ConversationTree:
+    def __init__(self):
+        self.root = None  # Starting MessageNode
+        self.current_node = None  # Current position in the conversation
+
+    def add_message(self, message, role):
+        new_node = MessageNode(message, role, parent=self.current_node)
+        if self.current_node:
+            self.current_node.next = new_node
+        else:
+            self.root = new_node
+        self.current_node = new_node
+
+    def edit_message(self, node, new_message):
+        node.message = new_message
+        # Remove all child nodes and regenerate conversation from this point
+        node.children = []
+        node.next = None
+        self.current_node = node
+
+    def get_path_from_root(self, node=None):
+        if node is None:
+            node = self.current_node
+        path = []
+        while node:
+            path.insert(0, node)
+            node = node.parent
+        return path
+
+    def reset_to_node(self, node):
+        self.current_node = node
+        node.children = []
+        node.next = None
 
 class ChatApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Simple Chat")
         self.client = GptChat('sys_prompt.txt', get_key())
+        self.conversation_tree = ConversationTree()
+        self.message_widgets = {}  # Map message IDs to their widgets
         self.build_gui()
         self.root.protocol("WM_DELETE_WINDOW", self.on_quit)
 
@@ -20,17 +67,23 @@ class ChatApp:
         self.main_frame = tk.Frame(self.root)
         self.main_frame.pack(expand=True, fill='both')
 
-        # Conversation display area
-        self.conversation_text = tk.Text(self.main_frame, wrap='word', state='disabled')
-        self.conversation_text.pack(expand=True, fill='both')
+        # Canvas for scrolling
+        self.canvas = tk.Canvas(self.main_frame)
+        self.canvas.pack(side='left', fill='both', expand=True)
 
-        # Scrollbar for conversation
-        self.conversation_scrollbar = tk.Scrollbar(self.conversation_text, command=self.conversation_text.yview)
-        self.conversation_text['yscrollcommand'] = self.conversation_scrollbar.set
-        self.conversation_scrollbar.pack(side='right', fill='y')
+        # Scrollbar for canvas
+        self.scrollbar = tk.Scrollbar(self.main_frame, orient='vertical', command=self.canvas.yview)
+        self.scrollbar.pack(side='right', fill='y')
+
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.canvas.bind('<Configure>', lambda e: self.canvas.configure(scrollregion=self.canvas.bbox('all')))
+
+        # Frame inside the canvas
+        self.chat_frame = tk.Frame(self.canvas)
+        self.canvas.create_window((0, 0), window=self.chat_frame, anchor='nw')
 
         # Input area
-        self.input_frame = tk.Frame(self.main_frame)
+        self.input_frame = tk.Frame(self.root)
         self.input_frame.pack(fill='x')
 
         self.input_text = tk.Text(self.input_frame, height=3)
@@ -45,7 +98,7 @@ class ChatApp:
         self.input_text.bind('<Return>', self.on_enter_pressed)
 
         # Status bar
-        self.status_bar = tk.Label(self.main_frame, text=f"Usage: {self.client.total_tokens} tokens", bd=1, relief=tk.SUNKEN, anchor=tk.W)
+        self.status_bar = tk.Label(self.root, text=f"Usage: {self.client.total_tokens} tokens", bd=1, relief=tk.SUNKEN, anchor=tk.W)
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
         # Menu bar
@@ -81,23 +134,87 @@ class ChatApp:
         if not user_input:
             return
         self.input_text.delete("1.0", tk.END)
-        self.display_message("User", user_input)
-        if user_input[0] == '\\':
+        self.add_message_box(user_input, 'user')
+        if user_input.startswith('\\'):
             self.run_command(user_input[1:])
         else:
+            self.conversation_tree.add_message(user_input, 'user')
             self.get_response(user_input)
 
-    def display_message(self, sender, message):
-        self.conversation_text.config(state='normal')
-        self.conversation_text.insert(tk.END, f"{sender}:\n{message}\n\n")
-        self.conversation_text.config(state='disabled')
-        self.conversation_text.see(tk.END)
+    def add_message_box(self, message, role, node=None):
+        if node is None:
+            node = self.conversation_tree.current_node
+
+        frame = tk.Frame(self.chat_frame, bd=2, relief='groove', padx=5, pady=5)
+        frame.pack(fill='x', padx=5, pady=5)
+
+        message_label = tk.Text(frame, wrap='word', height=4, bg='#f0f0f0' if role == 'assistant' else '#e0ffe0')
+        message_label.insert('1.0', message)
+        message_label.config(state='disabled')
+        message_label.pack(side='left', fill='both', expand=True)
+
+        if role == 'user':
+            edit_button = tk.Button(frame, text='Edit', command=lambda n=node: self.edit_message(n))
+            edit_button.pack(side='right')
+
+        self.message_widgets[node.id] = frame
+        self.root.update_idletasks()
+        self.canvas.configure(scrollregion=self.canvas.bbox('all'))
+        self.canvas.yview_moveto(1)
+
+    def edit_message(self, node):
+        # Prompt user to edit the message
+        new_message = simpledialog.askstring("Edit Message", "Edit your message:", initialvalue=node.message)
+        if new_message is None:
+            return  # User cancelled
+        # Update the message in the conversation tree
+        self.conversation_tree.edit_message(node, new_message)
+        # Remove message boxes after this node
+        self.remove_messages_after(node)
+        # Update the message box
+        self.update_message_box(node, new_message)
+        # Regenerate conversation from this point
+        self.get_response(new_message)
+
+    def update_message_box(self, node, new_message):
+        frame = self.message_widgets.get(node.id)
+        if frame:
+            for widget in frame.winfo_children():
+                if isinstance(widget, tk.Text):
+                    widget.config(state='normal')
+                    widget.delete('1.0', tk.END)
+                    widget.insert('1.0', new_message)
+                    widget.config(state='disabled')
+
+    def remove_messages_after(self, node):
+        # Remove all message boxes after the edited node
+        nodes_to_remove = []
+        current = node.next
+        while current:
+            nodes_to_remove.append(current)
+            current = current.next
+
+        for n in nodes_to_remove:
+            frame = self.message_widgets.pop(n.id, None)
+            if frame:
+                frame.destroy()
+
+    def display_message(self, message, role):
+        self.add_message_box(message, role)
 
     def get_response(self, user_input):
         def worker():
             try:
-                response = self.client.send(user_input)
-                self.root.after(0, self.display_message, self.client.model, response)
+                # Build the message path up to current node
+                messages = []
+                path = self.conversation_tree.get_path_from_root()
+                for node in path:
+                    messages.append({'role': node.role, 'content': node.message})
+                # Send the messages to the client
+                response = self.client.send_messages(messages)
+                # Add assistant's response to the conversation tree
+                self.conversation_tree.add_message(response, 'assistant')
+                self.root.after(0, self.display_message, response, 'assistant')
                 self.root.after(0, self.update_status)
             except Exception as e:
                 self.root.after(0, messagebox.showerror, "Error", str(e))
@@ -132,7 +249,7 @@ class ChatApp:
     def help_menu(self):
         help_text = '''
 HELP MENU:
-save [file_name]: saves the file to "completions/[file_name]_[today].json" and resets the app
+save [file_name]: saves the conversation tree to "completions/[file_name]_[today].json" and resets the app
 load: go to load menu (app will be reset)
 reset: reset conversation (app will be reset)
 change_model: change current model
@@ -142,13 +259,12 @@ regen: rerun last message again
         messagebox.showinfo("Help", help_text)
 
     def ask_save(self):
-        if len(self.client.messages) < 2:
+        if self.conversation_tree.root is None:
             return
-        if messagebox.askyesno("Save", "Message history not empty, save current conversation?"):
+        if messagebox.askyesno("Save", "Conversation not empty, save current conversation?"):
             file_name = simpledialog.askstring("Save", "File Name:")
             if file_name:
-                self.client.save_completions(file_name)
-                messagebox.showinfo("Save", f"Conversation saved to completions/{file_name}")
+                self.save_conversation([file_name])
 
     def save_conversation(self, args):
         if args:
@@ -157,16 +273,39 @@ regen: rerun last message again
             file_name = simpledialog.askstring("Save", "File Name:")
             if not file_name:
                 return
-        self.client.save_completions(file_name)
-        messagebox.showinfo("Save", f"Conversation saved to completions/{file_name}")
+        if not os.path.exists('completions'):
+            os.makedirs('completions')
+        full_name = f'completions/{file_name}.json'
+        # Serialize the conversation tree
+        data = self.serialize_conversation_tree()
+        with open(full_name, 'w', encoding='utf-8') as f:
+            json.dump(data, f)
+        messagebox.showinfo("Save", f"Conversation saved to {full_name}")
         self.reset_app()
+
+    def serialize_conversation_tree(self):
+        # Serialize the conversation tree into a JSON-serializable format
+        def serialize_node(node):
+            data = {
+                'id': node.id,
+                'message': node.message,
+                'role': node.role,
+                'children': [serialize_node(child) for child in node.children],
+            }
+            return data
+        root_node = self.conversation_tree.root
+        return {
+            'model': self.client.model,
+            'conversation_tree': serialize_node(root_node) if root_node else None,
+        }
 
     def reset_app(self):
         self.ask_save()
         self.main_frame.destroy()
         self.client = GptChat('sys_prompt.txt', get_key())
+        self.conversation_tree = ConversationTree()
+        self.message_widgets = {}
         self.build_gui()
-        self.display_message('System', 'Chat reset')
 
     def include(self, file_name: str = None):
         if file_name is None:
@@ -182,7 +321,7 @@ regen: rerun last message again
             text = f.read()
         self.client.add_message("user", f'Here is a document that I want to include in our conversation:\n{text}')
         self.client.add_message("assistant", "Ok")
-        self.display_message("System", f"Including data in conversation from {full_name}:\n{text}")
+        self.display_message(f"Including data in conversation from {full_name}:\n{text}", 'system')
 
     def load_file(self, full_name: str):
         if not os.path.exists(full_name):
@@ -195,14 +334,26 @@ regen: rerun last message again
                 messagebox.showerror("Error", f"Could not load file {full_name}\n{e}")
                 return
         self.reset_app()
-        self.display_message("System", f"Conversation loaded. Model changed to {model}")
-        model = data['model']
-        for msg in data["conversation"]:
-            role = msg['role']
-            content = msg['content']
-            self.client.add_message(role, content)
-            self.display_message(role, content)
-        self.client.change_model(model)
+        self.client.change_model(data.get('model', self.client.model))
+        self.deserialize_conversation_tree(data.get('conversation_tree'))
+        messagebox.showinfo("Load", f"Conversation loaded. Model set to {self.client.model}")
+
+    def deserialize_conversation_tree(self, data):
+        # Reconstruct the conversation tree from the serialized data
+        def deserialize_node(data, parent=None):
+            node = MessageNode(data['message'], data['role'], parent=parent)
+            node.id = data['id']
+            self.add_message_box(node.message, node.role, node)
+            for child_data in data.get('children', []):
+                child_node = deserialize_node(child_data, parent=node)
+                node.children.append(child_node)
+            return node
+
+        if data:
+            self.conversation_tree.root = deserialize_node(data)
+            # Set the current node to the last node in the path
+            path = self.conversation_tree.get_path_from_root()
+            self.conversation_tree.current_node = path[-1] if path else None
 
     def load_menu(self):
         self.ask_save()
@@ -233,13 +384,14 @@ regen: rerun last message again
         tk.Button(model_window, text="Cancel", command=model_window.destroy).pack(fill='x')
 
     def regen_message(self):
-        try:
-            self.client.messages.pop()
-            last_message = self.client.messages.pop()
-            self.display_message("System", "Regenerating last message...")
-            self.get_response(last_message.content)
-        except IndexError:
-            messagebox.showerror("Error", "No messages to regenerate.")
+        if self.conversation_tree.current_node and self.conversation_tree.current_node.role == 'assistant':
+            # Remove the assistant's last message and regenerate
+            self.remove_messages_after(self.conversation_tree.current_node.parent)
+            self.conversation_tree.current_node = self.conversation_tree.current_node.parent
+            last_user_input = self.conversation_tree.current_node.message
+            self.get_response(last_user_input)
+        else:
+            messagebox.showerror("Error", "No assistant message to regenerate.")
 
     # Handle Enter and Shift+Enter in input_text
     def on_enter_pressed(self, event):
