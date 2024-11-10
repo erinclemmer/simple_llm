@@ -134,11 +134,11 @@ class ChatApp:
         if not user_input:
             return
         self.input_text.delete("1.0", tk.END)
-        self.add_message_box(user_input, 'user')
         if user_input.startswith('\\'):
             self.run_command(user_input[1:])
         else:
-            self.conversation_tree.add_message(user_input, 'user')
+            self.conversation_tree.add_message(user_input, 'user')  # Add to conversation tree first
+            self.add_message_box(user_input, 'user')                # Then add message box
             self.get_response(user_input)
 
     def add_message_box(self, message, role, node=None):
@@ -204,20 +204,17 @@ class ChatApp:
 
     def get_response(self, user_input):
         def worker():
-            try:
-                # Build the message path up to current node
-                messages = []
-                path = self.conversation_tree.get_path_from_root()
-                for node in path:
-                    messages.append({'role': node.role, 'content': node.message})
-                # Send the messages to the client
-                response = self.client.send_messages(messages)
-                # Add assistant's response to the conversation tree
-                self.conversation_tree.add_message(response, 'assistant')
-                self.root.after(0, self.display_message, response, 'assistant')
-                self.root.after(0, self.update_status)
-            except Exception as e:
-                self.root.after(0, messagebox.showerror, "Error", str(e))
+            # Build the message path up to current node
+            messages = []
+            path = self.conversation_tree.get_path_from_root()
+            for node in path:
+                messages.append({'role': node.role, 'content': node.message})
+            # Send the messages to the client
+            response = self.client.send_messages(messages)
+            # Add assistant's response to the conversation tree
+            self.conversation_tree.add_message(response, 'assistant')
+            self.root.after(0, self.display_message, response, 'assistant')
+            self.root.after(0, self.update_status)
         threading.Thread(target=worker).start()
 
     def update_status(self):
