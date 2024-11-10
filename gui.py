@@ -23,7 +23,7 @@ class ConversationTree:
         self.root = None  # Starting MessageNode
         self.current_node = None  # Current position in the conversation
 
-    def add_message(self, message, role):
+    def add_message(self, message: str, role: str):
         new_node = MessageNode(message, role, parent=self.current_node)
         if self.current_node:
             self.current_node.next = new_node
@@ -31,14 +31,14 @@ class ConversationTree:
             self.root = new_node
         self.current_node = new_node
 
-    def edit_message(self, node, new_message):
+    def edit_message(self, node: MessageNode, new_message: str):
         node.message = new_message
         # Remove all child nodes and regenerate conversation from this point
         node.children = []
         node.next = None
         self.current_node = node
 
-    def get_path_from_root(self, node=None):
+    def get_path_from_root(self, node: MessageNode =None):
         if node is None:
             node = self.current_node
         path = []
@@ -47,7 +47,7 @@ class ConversationTree:
             node = node.parent
         return path
 
-    def reset_to_node(self, node):
+    def reset_to_node(self, node: MessageNode):
         self.current_node = node
         node.children = []
         node.next = None
@@ -167,10 +167,10 @@ class ChatApp:
         new_message = simpledialog.askstring("Edit Message", "Edit your message:", initialvalue=node.message)
         if new_message is None:
             return  # User cancelled
-        # Update the message in the conversation tree
-        self.conversation_tree.edit_message(node, new_message)
         # Remove message boxes after this node
         self.remove_messages_after(node)
+        # Update the message in the conversation tree
+        self.conversation_tree.edit_message(node, new_message)
         # Update the message box
         self.update_message_box(node, new_message)
         # Regenerate conversation from this point
@@ -203,19 +203,17 @@ class ChatApp:
         self.add_message_box(message, role)
 
     def get_response(self, user_input):
-        def worker():
-            # Build the message path up to current node
-            messages = []
-            path = self.conversation_tree.get_path_from_root()
-            for node in path:
-                messages.append({'role': node.role, 'content': node.message})
-            # Send the messages to the client
-            response = self.client.send_messages(messages)
-            # Add assistant's response to the conversation tree
-            self.conversation_tree.add_message(response, 'assistant')
-            self.root.after(0, self.display_message, response, 'assistant')
-            self.root.after(0, self.update_status)
-        threading.Thread(target=worker).start()
+        # Build the message path up to current node
+        path = self.conversation_tree.get_path_from_root()
+        self.client.reset_chat()
+        for node in path[:-1]:
+            self.client.add_message(node.role, node.message)
+        # Send the messages to the client
+        response = self.client.send(path[-1].message)
+        # Add assistant's response to the conversation tree
+        self.conversation_tree.add_message(response, 'assistant')
+        self.root.after(0, self.display_message, response, 'assistant')
+        self.root.after(0, self.update_status)
 
     def update_status(self):
         self.status_bar.config(text=f"Usage: {self.client.total_tokens} tokens")
