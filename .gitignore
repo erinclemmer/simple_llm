@@ -2,3 +2,4 @@ config.json
 completions/
 data/
 __pycache__/
+.vscode/
