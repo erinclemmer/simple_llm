@@ -1,4 +1,4 @@
-# simple_llm
+# Simple LLM Client
 
 A lightweight, tree-based conversational UI built on top of a local or remote language model (LLM). This project lets you interact with a GPT-like model in a graphical interface powered by Tkinter, enabling you to branch, edit, and regenerate responses.
 
